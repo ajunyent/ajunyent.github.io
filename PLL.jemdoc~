@@ -12,6 +12,4 @@ This is a test
 ~~~
 {}{}
 T(theta):=2/3*matrix([cos(theta),cos(theta-2*%pi/3),cos(theta+2*%pi/3)],[sin(theta),sin(theta-2*%pi/3),sin(theta+2*%pi/3)],[1/2,1/2,1/2]);
-Tn(theta):=matrix([cos(theta),sin(theta),1],[cos(theta-2*%pi/3),sin(theta-2*%pi/3),1],[cos(theta+2*%pi/3),sin(theta+2*%pi/3),1]);
-R(theta):=matrix([cos(theta),-sin(theta),0],[sin(theta),cos(theta),0],[0,0,1]);
 ~~~

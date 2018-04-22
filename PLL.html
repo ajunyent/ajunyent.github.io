@@ -34,10 +34,17 @@ try {
 </div>
 <p>This is a test</p>
 
-<div class="eqwl"><img class="eqwl" src="eqs/8573675050206995218-130.png" alt=" 	sqrt{x^2+y^2}=frac{2}{3} " />
-<br /></div><div id="footer">
+<div class="eqwl"><img class="eqwl" src="eqs/1798808338-130.png" alt=" 	sqrt{x^2+y^2}=frac{2}{3} " />
+<br /></div><h2>Maxima code</h2>
+<div class="codeblock">
+<div class="blockcontent"><pre>
+T(theta):=2/3*matrix([cos(theta),cos(theta-2*%pi/3),cos(theta+2*%pi/3)],[sin(theta),sin(theta-2*%pi/3),sin(theta+2*%pi/3)],[1/2,1/2,1/2]);
+Tn(theta):=matrix([cos(theta),sin(theta),1],[cos(theta-2*%pi/3),sin(theta-2*%pi/3),1],[cos(theta+2*%pi/3),sin(theta+2*%pi/3),1]);
+R(theta):=matrix([cos(theta),-sin(theta),0],[sin(theta),cos(theta),0],[0,0,1]);
+</pre></div></div>
+<div id="footer">
 <div id="footer-text">
-Page generated 2018-04-21 08:31:26 UTC, by <a href="http://jemdoc.jaboc.net/">jemdoc</a>.
+Page generated 2018-04-22 14:03:38 BST, by <a href="http://jemdoc.jaboc.net/">jemdoc</a>.
 </div>
 </div>
 </td>
