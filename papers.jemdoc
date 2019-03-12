@@ -8,6 +8,8 @@ The list below has been automatically generated from my
 = 2019
 : {Comparative Optimization Design of a Modular Multilevel Converter Tapping Cells and a 2L-VSC for Hybrid LV ac/dc Microgrids} in IEEE Transactions on Industry Applications by Lachichi, Amel; Junyent-Ferre, Adria; Green, Tim; 
 : {A Data Analytics Perspective of Power Grid Analysis-Part 1: The Clarke and Related Transforms [Lecture Notes]} in IEEE Signal Processing Magazine by Mandic, Danilo P; Kanna, Sithan; Xia, Yili; Moniri, Ahmad; Junyent-Ferre, Adria; Constantinides, Anthony G; 
+: {H5+ Converter: A Bidirectional AC-DC Converter with DC-Fault-Blocking and Self-Pre-Charge Capabilities} in IEEE Transactions on Power Electronics by Wang, Ye; Li, Yitong; Ferre, Adria Junyent; Kim, Minsung; 
+: {Transfverter: imbuing transformer-like properties in an interlink converter for robust control of a hybrid ac-dc microgrid} in IEEE Transactions on Power Electronics by Gu, Yunjie; Li, Yitong; Yoo, Hyeong-Jun; Nguyen, Thai-Thanh; Xiang, Xin; Kim, Hak-Man; Ferre, Adria Junyent; Green, Tim C; 
 = 2018
 : {A three-phase active rectifier topology for bipolar DC distribution} in IEEE Transactions on Power Electronics by Li, Yitong; Junyent-Ferré, Adrià; Rodriguez-Bernuz, Joan-Marc; 
 : {Analysis of MMC energy-based control structures for VSC-HVDC links} in IEEE Journal of Emerging and Selected Topics in Power Electronics by Sánchez-Sánchez, Enric; Prieto-Araujo, Eduardo; Junyent-Ferré, Adrià; Gomis-Bellmunt, Oriol; 
@@ -36,7 +38,6 @@ The list below has been automatically generated from my
 : {Control of a wind turbine cluster based on squirrel cage induction generators connected to a single VSC power converter} in International Journal of Electrical Power & Energy Systems by Egea-Alvarez, Agustí; Junyent-Ferre, Adrià; Bergas-Jané, Joan; Bianchi, Fernando D; Gomis-Bellmunt, Oriol; 
 : {Operation of HVDC Modular Multilevel Converters under DC pole imbalances} in Power Electronics and Applications (EPE'14-ECCE Europe), 2014 16th European Conference on by Junyent-Ferre, Adria; Clemow, Philip; Merlin, Michael M.C.; Green, Tim C.; 
 : {Distributed control of a nine phase permanent magnet generator and scaled platform validation} in Proc. Eur. Wind Energy Assoc. by Prieto-Araujo, E; Junyent-Ferre, A; Lavernia, D; Gomis-Bellmunt, O; 
-: {Control of a wind turbine cluster based on squirrel cage induction generators connected to a single VSC power converter} in  by Bergas, J; Bianchi, FD; Egea, A; Gomis-Bellmunt, O; Junyent-Ferré, A; 
 = 2013
 : {Multiterminal-HVDC scaled platform for offshore wind transmission systems emulation} in 2013 15th European Conference on Power Electronics and Applications (EPE) by Egea-Alvarez, Agustí; Junyent-Ferré, Adrià; Gross, Gabriel; Galceran-Arellano, Samuel; Gomis-Bellmunt, Oriol; 
 : {Development of a laboratory platform for testing new solutions to integrate renewable energy sources in power systems} in 2013 15th European Conference on Power Electronics and Applications (EPE) by Prieto-Araujo, Eduardo; Cheah-Mañé, Marc; Villafafila-Robles, Roberto; Gomis-Bellmunt, Oriol; Junyent-Ferré, Adrià; 
@@ -49,7 +50,6 @@ The list below has been automatically generated from my
 : {Optimal control of voltage source converters under power system faults} in Control Engineering Practice by Bianchi, Fernando D; Egea-Alvarez, Agustí; Junyent-Ferré, Adrià; Gomis-Bellmunt, Oriol; 
 : {Experimental implementation of a voltage control for a Multiterminal VSC-HVDC offshore transmission system} in 2012 3rd IEEE PES Innovative Smart Grid Technologies Europe (ISGT Europe) by Egea-Alvarez, Agustí; Bianchi, Fernando; Junyent-Ferré, Adria; Gross, Gabriel; Gomis-Bellmunt, Oriol; 
 : {Active and reactive power control of grid connected distributed generation systems} in  by Egea, A; Gomis-Bellmunt, O; Junyent-Ferré, A; 
-: {Voltage control of multiterminal VSC-HVDC transmission systems for offshore wind power plants: Design and implementation in a scaled platform} in  by Bianchi, FD; Egea, A; Gomis-Bellmunt, O; Gross, Gabriel; Junyent-Ferré, A; 
 = 2011
 : {Methodology for droop control dynamic analysis of multiterminal VSC-HVDC grids for offshore wind farms} in Power Delivery, IEEE Transactions on by Prieto-Araujo, Eduardo; Bianchi, Fernando D; Junyent-Ferré, Adrià; Gomis-Bellmunt, Oriol; 
 : {Current control reference calculation issues for the operation of renewable source grid interface VSCs under unbalanced voltage sags} in IEEE Transactions on Power Electronics by Junyent-Ferre, Adrià; Gomis-Bellmunt, Oriol; Green, Tim C; Soto-Sanchez, Diego E; 
@@ -77,7 +77,6 @@ The list below has been automatically generated from my
 : {Control of a squirrel cage induction generator wind farm connected to a single power converter} in 45th International Universities Power Engineering Conference UPEC2010 by Trilla, Lluis; Gomis-Bellmunt, Oriol; Junyent-Ferre, Adria; Alvarez, Agusti Egea; Sudria-Andreu, Antoni; 
 : {Vector control of squirrel cage induction generator for wind power} in Electrical Machines (ICEM), 2010 XIX International Conference on by Domínguez-García, JL; Gomis-Bellmunt, Oriol; Trilla-Romero, Lluıs; Junyent-Ferré, Adria; 
 : {Permanent magnet synchronous generator offshore wind farms connected to a single power converter} in IEEE PES General Meeting by Gomis-Bellmunt, Oriol; Junyent-Ferre, Adria; Sumper, Andreas; Bergas-Jane, Joan; 
-: {Electromechanical modelling and control of a micro-wind generation system for isolated low power DC micro grids} in  by Clos, D; Colet Subirachs, A; Ferrer-Martí, L; Gomis-Bellmunt, O; Junyent-Ferré, A; Martin, G; Villafafila-Robles, R; 
 : {Electromechanical modelling and control of a micro-wind generation system for isolated low power DC micro grids} in EPE journal by Colet-Subirachs, Alba; Gomis-Bellmunt, Oriol; Clos-Costa, Daniel; Martín-Segura, Guillermo; Junyent-Ferre, Adriä; Villafáfila-Robles, Roberto; Ferrer-Marti, Laia; 
 = 2009
 : {Control of a doubly-fed induction generator under unbalanced conditions considering the converter limits} in Power Electronics and Applications, 2009. EPE'09. 13th European Conference on by Gomis-Bellmunt, Oriol; Junyent-Ferré, Adria; Sumper, Andreas; Sudria-Andreu, Antoni; Mata, Montserrat; Sala, Marc; 
@@ -87,7 +86,6 @@ The list below has been automatically generated from my
 : {Genetic Algorithm approach in FACTS devices location for the improvement of energy efficiency in distribution networks} in International Conference on Renewable Energies and Power Qualities (ICREPQ 09) by Pezzini, Paola; Gomis-Bellmunt, Oriol; Gonzalez-de-Miguel, Carlos; Junyent-Ferré, Adria; Sudria-Andreu, Antoni; 
 = 2008
 : {Ride-through control of a doubly fed induction generator under unbalanced voltage sags} in Energy conversion, IEEE Transactions on by Gomis-Bellmunt, Oriol; Junyent-Ferre, Adria; Sumper, Andreas; Bergas-Jan, J; 
-: {Ride-Through Control of a Doubly Fed Induction Generator Under Unbalanced Voltage Sags} in  by Bergas, J; Gomis-Bellmunt, O; Junyent-Ferré, A; Sumper, A; 
 = 2007
 : {Digital simulation of voltage dip characteristics of wind turbine systems} in Electrical Power Quality and Utilisation, 2007. EPQU 2007. 9th International Conference on by Junyent-Ferré, Adria; Gomis-Bellmunt, Oriol; Martinez-Rojas, M; Sumper, Andreas; Sala, Marc; Mata, Montserrat; 
 : {Modelització i control d'un sistema de generació elèctrica de turbina de vent} in  by Junyent Ferré, Adrià; 
