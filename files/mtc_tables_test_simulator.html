@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MTC Tables Test Simulator</title>
+  <style>
+    :root {
+      --bg: #f7f7f8;
+      --card: #ffffff;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --line: #e5e7eb;
+      --accent: #2563eb;
+      --good: #15803d;
+      --bad: #b91c1c;
+      --warn: #ca8a04;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .app {
+      width: min(900px, 100%);
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 28px;
+      box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
+    }
+
+    h1, h2, h3 {
+      margin: 0 0 12px;
+      line-height: 1.2;
+    }
+
+    p {
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    button, input, select {
+      font: inherit;
+    }
+
+    button {
+      border: 0;
+      background: var(--accent);
+      color: white;
+      padding: 11px 16px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-weight: 650;
+    }
+
+    button.secondary {
+      background: #eef2ff;
+      color: #1e40af;
+    }
+
+    button.light {
+      background: #f3f4f6;
+      color: var(--text);
+    }
+
+    button.danger {
+      background: #fee2e2;
+      color: var(--bad);
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    input, select {
+      width: 100%;
+      padding: 12px 13px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: white;
+      color: var(--text);
+    }
+
+    .row {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .row > * {
+      flex: 1 1 180px;
+    }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 18px;
+    }
+
+    .small {
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: center;
+      margin-bottom: 18px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 10px;
+      border-radius: 999px;
+      background: #f3f4f6;
+      color: var(--muted);
+      font-size: 0.92rem;
+      white-space: nowrap;
+    }
+
+    .question {
+      text-align: center;
+      padding: 24px 0 10px;
+    }
+
+    .questionText {
+      font-size: clamp(3.2rem, 12vw, 7rem);
+      font-weight: 800;
+      letter-spacing: -0.05em;
+      margin: 18px 0;
+    }
+
+    .answerBox {
+      max-width: 260px;
+      margin: 0 auto;
+      text-align: center;
+      font-size: 2rem;
+      font-weight: 700;
+    }
+
+    .timerWrap {
+      height: 14px;
+      border-radius: 999px;
+      background: #e5e7eb;
+      overflow: hidden;
+      margin-top: 18px;
+    }
+
+    .timerBar {
+      height: 100%;
+      width: 100%;
+      background: var(--accent);
+      transform-origin: left center;
+    }
+
+    .timerBar.running {
+      animation-name: countdown;
+      animation-timing-function: linear;
+      animation-fill-mode: forwards;
+    }
+
+    @keyframes countdown {
+      from { transform: scaleX(1); }
+      to { transform: scaleX(0); }
+    }
+
+    .feedback {
+      min-height: 32px;
+      margin-top: 12px;
+      font-weight: 700;
+    }
+
+    .feedback.good { color: var(--good); }
+    .feedback.bad { color: var(--bad); }
+    .feedback.warn { color: var(--warn); }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 14px;
+      font-size: 0.95rem;
+    }
+
+    th, td {
+      text-align: left;
+      padding: 10px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--muted);
+      font-weight: 700;
+      background: #fafafa;
+    }
+
+    .correct { color: var(--good); font-weight: 700; }
+    .wrong { color: var(--bad); font-weight: 700; }
+    .timeout { color: var(--warn); font-weight: 700; }
+
+    .statsGrid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin: 16px 0;
+    }
+
+    .statBox {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      background: #fafafa;
+    }
+
+    .statBox .value {
+      font-size: 1.7rem;
+      font-weight: 800;
+      color: var(--text);
+    }
+
+    .statBox .label {
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .chartBox {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px;
+      margin: 16px 0;
+      background: white;
+    }
+
+    canvas {
+      max-width: 100%;
+    }
+
+    .mutedLine {
+      border-top: 1px solid var(--line);
+      margin: 20px 0;
+    }
+
+    @media (max-width: 720px) {
+      body { padding: 12px; align-items: stretch; }
+      .card { padding: 20px; }
+      .topbar { align-items: flex-start; flex-direction: column; }
+      .statsGrid { grid-template-columns: 1fr; }
+      th, td { font-size: 0.86rem; padding: 8px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <section id="screenUser" class="card">
+      <h1>MTC Tables Test Simulator</h1>
+      <p>Choose a pupil name or create a new one. Results are stored locally in this browser using cookies.</p>
+
+      <div class="row">
+        <div>
+          <label class="small" for="existingUser">Existing pupil</label>
+          <select id="existingUser"></select>
+        </div>
+        <div>
+          <label class="small" for="newUser">New pupil name</label>
+          <input id="newUser" placeholder="e.g. Alex" autocomplete="off" />
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="continueBtn">Continue</button>
+        <button id="clearAllBtn" class="danger">Clear all local data</button>
+      </div>
+    </section>
+
+    <section id="screenHome" class="card hidden">
+      <div class="topbar">
+        <div>
+          <h1>Hello, <span id="currentUserName"></span></h1>
+          <p class="small">25 questions. 6 seconds per question. 3 seconds between questions.</p>
+        </div>
+        <span class="pill">Stored locally</span>
+      </div>
+      <div class="actions">
+        <button id="startRunBtn">Start test</button>
+        <button id="showStatsBtn" class="secondary">See statistics</button>
+        <button id="changeUserBtn" class="light">Change pupil</button>
+      </div>
+    </section>
+
+    <section id="screenTest" class="card hidden">
+      <div class="topbar">
+        <span class="pill">Question <span id="questionNumber">1</span> of 25</span>
+        <span class="pill">Score: <span id="liveScore">0</span></span>
+      </div>
+
+      <div class="timerWrap" aria-label="Time remaining">
+        <div id="timerBar" class="timerBar"></div>
+      </div>
+
+      <div class="question">
+        <div id="questionText" class="questionText">7 × 8</div>
+        <input id="answerInput" class="answerBox" inputmode="numeric" pattern="[0-9]*" autocomplete="off" aria-label="Answer" />
+        <div id="feedback" class="feedback"></div>
+      </div>
+    </section>
+
+    <section id="screenSummary" class="card hidden">
+      <h1>Test summary</h1>
+      <div class="statsGrid">
+        <div class="statBox"><div id="summaryCorrect" class="value">0</div><div class="label">Correct</div></div>
+        <div class="statBox"><div id="summaryWrong" class="value">0</div><div class="label">Wrong</div></div>
+        <div class="statBox"><div id="summaryTimeouts" class="value">0</div><div class="label">Timed out</div></div>
+      </div>
+      <div id="summaryTableWrap"></div>
+      <div class="actions">
+        <button id="newRunBtn">Start new test</button>
+        <button id="summaryStatsBtn" class="secondary">See statistics</button>
+        <button id="summaryHomeBtn" class="light">Home</button>
+      </div>
+    </section>
+
+    <section id="screenStats" class="card hidden">
+      <div class="topbar">
+        <div>
+          <h1>Statistics for <span id="statsUserName"></span></h1>
+          <p class="small">All historical answers stored in this browser for this pupil.</p>
+        </div>
+        <button id="statsBackBtn" class="light">Back</button>
+      </div>
+
+      <div class="statsGrid">
+        <div class="statBox"><div id="statAttempts" class="value">0</div><div class="label">Total attempts</div></div>
+        <div class="statBox"><div id="statCorrect" class="value">0</div><div class="label">Correct answers</div></div>
+        <div class="statBox"><div id="statAvgTime" class="value">-</div><div class="label">Average answer time</div></div>
+      </div>
+
+      <div class="chartBox">
+        <h3>Correct answers per run over time</h3>
+        <canvas id="correctChart" width="820" height="240"></canvas>
+      </div>
+
+      <div class="chartBox">
+        <h3>Average answer time over time</h3>
+        <canvas id="timeChart" width="820" height="240"></canvas>
+      </div>
+
+      <div class="mutedLine"></div>
+      <h3>Per multiplication combination</h3>
+      <div id="comboStatsWrap"></div>
+    </section>
+  </main>
+
+  <script>
+    const QUESTION_COUNT = 25;
+    const ANSWER_SECONDS = 6;
+    const BETWEEN_SECONDS = 3;
+    const COOKIE_NAME = "mtc_tables_test_data_v2";
+
+    const el = id => document.getElementById(id);
+
+    let data = loadData();
+    let currentUser = "";
+    let run = [];
+    let qIndex = 0;
+    let activeQuestion = null;
+    let questionStart = 0;
+    let questionTimer = null;
+    let betweenTimer = null;
+    let acceptingAnswer = false;
+
+    const screens = ["screenUser", "screenHome", "screenTest", "screenSummary", "screenStats"];
+
+    function showScreen(id) {
+      screens.forEach(s => el(s).classList.toggle("hidden", s !== id));
+    }
+
+    function setCookie(name, value, days) {
+      const expires = new Date(Date.now() + days * 864e5).toUTCString();
+      document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; expires=${expires}; path=/; SameSite=Lax`;
+    }
+
+    function getCookie(name) {
+      const target = encodeURIComponent(name) + "=";
+      return document.cookie.split(";").map(s => s.trim()).find(s => s.startsWith(target))?.slice(target.length) || "";
+    }
+
+    function loadData() {
+      try {
+        const raw = getCookie(COOKIE_NAME);
+        if (!raw) return { users: {} };
+        const parsed = JSON.parse(decodeURIComponent(raw));
+        if (!parsed || typeof parsed !== "object" || !parsed.users) return { users: {} };
+        return parsed;
+      } catch {
+        return { users: {} };
+      }
+    }
+
+    function saveData() {
+      setCookie(COOKIE_NAME, JSON.stringify(data), 3650);
+    }
+
+    function clearCookie(name) {
+      document.cookie = `${encodeURIComponent(name)}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; SameSite=Lax`;
+    }
+
+    function ensureUser(name) {
+      if (!data.users[name]) {
+        data.users[name] = { attempts: [], runs: [] };
+      }
+      if (!Array.isArray(data.users[name].attempts)) data.users[name].attempts = [];
+      if (!Array.isArray(data.users[name].runs)) data.users[name].runs = [];
+      saveData();
+    }
+
+    function populateUsers() {
+      const select = el("existingUser");
+      const names = Object.keys(data.users).sort((a, b) => a.localeCompare(b));
+      select.innerHTML = "";
+      if (names.length === 0) {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "No stored pupils yet";
+        select.appendChild(opt);
+        select.disabled = true;
+      } else {
+        select.disabled = false;
+        const blank = document.createElement("option");
+        blank.value = "";
+        blank.textContent = "Choose a pupil";
+        select.appendChild(blank);
+        names.forEach(name => {
+          const opt = document.createElement("option");
+          opt.value = name;
+          opt.textContent = name;
+          select.appendChild(opt);
+        });
+      }
+    }
+
+    function enterHome() {
+      el("currentUserName").textContent = currentUser;
+      showScreen("screenHome");
+    }
+
+    function randomQuestion() {
+      const a = 2 + Math.floor(Math.random() * 11);
+      const b = 2 + Math.floor(Math.random() * 11);
+      return { a, b, answer: a * b };
+    }
+
+    function startRun() {
+      clearTimers();
+      run = [];
+      qIndex = 0;
+      el("liveScore").textContent = "0";
+      showScreen("screenTest");
+      nextQuestion();
+    }
+
+    function clearTimers() {
+      clearTimeout(questionTimer);
+      clearTimeout(betweenTimer);
+      questionTimer = null;
+      betweenTimer = null;
+    }
+
+    function nextQuestion() {
+      clearTimers();
+      if (qIndex >= QUESTION_COUNT) {
+        finishRun();
+        return;
+      }
+
+      activeQuestion = randomQuestion();
+      acceptingAnswer = true;
+      questionStart = performance.now();
+
+      el("questionNumber").textContent = String(qIndex + 1);
+      el("questionText").textContent = `${activeQuestion.a} × ${activeQuestion.b}`;
+      el("answerInput").value = "";
+      el("answerInput").disabled = false;
+      el("answerInput").focus();
+      el("feedback").textContent = "";
+      el("feedback").className = "feedback";
+
+      const bar = el("timerBar");
+      bar.classList.remove("running");
+      void bar.offsetWidth;
+      bar.style.animationDuration = `${ANSWER_SECONDS}s`;
+      bar.classList.add("running");
+
+      questionTimer = setTimeout(() => submitAnswer(null, true), ANSWER_SECONDS * 1000);
+    }
+
+    function submitAnswer(value, timedOut = false) {
+      if (!acceptingAnswer) return;
+      acceptingAnswer = false;
+      clearTimeout(questionTimer);
+      el("answerInput").disabled = true;
+      el("timerBar").classList.remove("running");
+
+      const elapsed = Math.min(ANSWER_SECONDS, (performance.now() - questionStart) / 1000);
+      const numeric = value === null || value === "" ? null : Number(value);
+      const correct = !timedOut && numeric === activeQuestion.answer;
+
+      const record = {
+        user: currentUser,
+        timestamp: new Date().toISOString(),
+        a: activeQuestion.a,
+        b: activeQuestion.b,
+        key: comboKey(activeQuestion.a, activeQuestion.b),
+        given: numeric,
+        expected: activeQuestion.answer,
+        seconds: Number(elapsed.toFixed(3)),
+        correct,
+        timedOut
+      };
+      run.push(record);
+
+      if (correct) {
+        el("feedback").textContent = "Correct";
+        el("feedback").className = "feedback good";
+      } else if (timedOut) {
+        el("feedback").textContent = `Time out. Answer: ${activeQuestion.answer}`;
+        el("feedback").className = "feedback warn";
+      } else {
+        el("feedback").textContent = `Wrong. Answer: ${activeQuestion.answer}`;
+        el("feedback").className = "feedback bad";
+      }
+
+      el("liveScore").textContent = String(run.filter(r => r.correct).length);
+      qIndex++;
+      betweenTimer = setTimeout(nextQuestion, BETWEEN_SECONDS * 1000);
+    }
+
+    function comboKey(a, b) {
+      const x = Math.min(a, b);
+      const y = Math.max(a, b);
+      return `${x}x${y}`;
+    }
+
+    function finishRun() {
+      const user = data.users[currentUser];
+      const userAttempts = user.attempts;
+      const runId = new Date().toISOString();
+      const correct = run.filter(r => r.correct).length;
+      const wrong = run.length - correct;
+      const timeouts = run.filter(r => r.timedOut).length;
+      const answered = run.filter(r => !r.timedOut);
+      const avgSeconds = answered.length ? answered.reduce((s, r) => s + r.seconds, 0) / answered.length : null;
+
+      run.forEach(r => {
+        r.runId = runId;
+        userAttempts.push(r);
+      });
+
+      user.runs.push({
+        id: runId,
+        timestamp: runId,
+        total: run.length,
+        correct,
+        wrong,
+        timeouts,
+        avgSeconds
+      });
+
+      saveData();
+      renderSummary();
+      showScreen("screenSummary");
+    }
+
+    function renderSummary() {
+      const correct = run.filter(r => r.correct).length;
+      const timeouts = run.filter(r => r.timedOut).length;
+      const wrong = run.length - correct;
+      el("summaryCorrect").textContent = correct;
+      el("summaryWrong").textContent = wrong;
+      el("summaryTimeouts").textContent = timeouts;
+
+      const rows = run.map((r, i) => {
+        const status = r.correct ? `<span class="correct">Correct</span>` : r.timedOut ? `<span class="timeout">Time out</span>` : `<span class="wrong">Wrong</span>`;
+        const given = r.given === null ? "-" : r.given;
+        return `<tr><td>${i + 1}</td><td>${r.a} × ${r.b}</td><td>${given}</td><td>${r.expected}</td><td>${status}</td><td>${r.seconds.toFixed(2)} s</td></tr>`;
+      }).join("");
+
+      el("summaryTableWrap").innerHTML = `
+        <table>
+          <thead><tr><th>#</th><th>Question</th><th>Your answer</th><th>Correct answer</th><th>Result</th><th>Time</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>`;
+    }
+
+    function attemptsForCurrentUser() {
+      return data.users[currentUser]?.attempts || [];
+    }
+
+    function runsForCurrentUser() {
+      ensureUser(currentUser);
+      return data.users[currentUser]?.runs || [];
+    }
+
+    function renderStats() {
+      const attempts = attemptsForCurrentUser();
+      el("statsUserName").textContent = currentUser;
+      el("statAttempts").textContent = attempts.length;
+      el("statCorrect").textContent = attempts.filter(a => a.correct).length;
+
+      const answered = attempts.filter(a => !a.timedOut);
+      const avg = answered.length ? answered.reduce((s, a) => s + a.seconds, 0) / answered.length : null;
+      el("statAvgTime").textContent = avg === null ? "-" : `${avg.toFixed(2)} s`;
+
+      drawCorrectChart(runsForCurrentUser(), attempts);
+      drawTimeChart(runsForCurrentUser(), attempts);
+      renderComboStats(attempts);
+      showScreen("screenStats");
+    }
+
+    function drawAxes(ctx, w, h, titleYLabel) {
+      ctx.clearRect(0, 0, w, h);
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = "#d1d5db";
+      ctx.beginPath();
+      ctx.moveTo(46, 16);
+      ctx.lineTo(46, h - 34);
+      ctx.lineTo(w - 16, h - 34);
+      ctx.stroke();
+      ctx.fillStyle = "#6b7280";
+      ctx.font = "12px system-ui";
+      ctx.fillText(titleYLabel, 12, 14);
+    }
+
+    function drawLineChart(canvasId, points, maxY, yLabel, formatter, xLabel = "runs over time") {
+      const canvas = el(canvasId);
+      const ctx = canvas.getContext("2d");
+      const w = canvas.width;
+      const h = canvas.height;
+      drawAxes(ctx, w, h, yLabel);
+
+      ctx.fillStyle = "#6b7280";
+      ctx.font = "12px system-ui";
+
+      if (points.length === 0) {
+        ctx.fillText("No data yet", 54, 48);
+        return;
+      }
+
+      const left = 46, right = w - 16, top = 20, bottom = h - 34;
+      const spanX = Math.max(1, points.length - 1);
+      const yMax = Math.max(1, maxY);
+
+      ctx.strokeStyle = "#e5e7eb";
+      for (let i = 0; i <= 4; i++) {
+        const y = bottom - (i / 4) * (bottom - top);
+        ctx.beginPath();
+        ctx.moveTo(left, y);
+        ctx.lineTo(right, y);
+        ctx.stroke();
+        ctx.fillText(formatter((i / 4) * yMax), 6, y + 4);
+      }
+
+      ctx.strokeStyle = "#2563eb";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      points.forEach((p, i) => {
+        const x = left + (i / spanX) * (right - left);
+        const y = bottom - (p / yMax) * (bottom - top);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+
+      ctx.fillStyle = "#2563eb";
+      points.forEach((p, i) => {
+        const x = left + (i / spanX) * (right - left);
+        const y = bottom - (p / yMax) * (bottom - top);
+        ctx.beginPath();
+        ctx.arc(x, y, 3, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      ctx.fillStyle = "#6b7280";
+      ctx.fillText(xLabel, right - 105, h - 10);
+    }
+
+    function buildRunsFromLegacyAttempts(attempts) {
+      // For data saved with the previous version, group attempts into blocks of 25.
+      const legacyRuns = [];
+      for (let i = 0; i < attempts.length; i += QUESTION_COUNT) {
+        const block = attempts.slice(i, i + QUESTION_COUNT);
+        if (block.length === 0) continue;
+        const correct = block.filter(r => r.correct).length;
+        const answered = block.filter(r => !r.timedOut);
+        legacyRuns.push({
+          timestamp: block[0].timestamp || "",
+          total: block.length,
+          correct,
+          avgSeconds: answered.length ? answered.reduce((s, r) => s + r.seconds, 0) / answered.length : null
+        });
+      }
+      return legacyRuns;
+    }
+
+    function drawCorrectChart(runs, attempts) {
+      const sourceRuns = runs.length ? runs : buildRunsFromLegacyAttempts(attempts);
+      const points = sourceRuns.map(r => r.correct);
+      drawLineChart("correctChart", points, QUESTION_COUNT, "correct", v => String(Math.round(v)), "runs over time");
+    }
+
+    function drawTimeChart(runs, attempts) {
+      const sourceRuns = runs.length ? runs : buildRunsFromLegacyAttempts(attempts);
+      const points = sourceRuns.map(r => r.avgSeconds === null || r.avgSeconds === undefined ? 0 : r.avgSeconds);
+      const max = Math.max(ANSWER_SECONDS, ...points);
+      drawLineChart("timeChart", points, max, "seconds", v => v.toFixed(1), "runs over time");
+    }
+
+    function renderComboStats(attempts) {
+      const map = new Map();
+      for (let a = 2; a <= 12; a++) {
+        for (let b = a; b <= 12; b++) {
+          map.set(`${a}x${b}`, { a, b, total: 0, correct: 0, timeouts: 0, timeSum: 0, timedAnswers: 0 });
+        }
+      }
+
+      attempts.forEach(r => {
+        const key = comboKey(r.a, r.b);
+        const item = map.get(key) || { a: Math.min(r.a, r.b), b: Math.max(r.a, r.b), total: 0, correct: 0, timeouts: 0, timeSum: 0, timedAnswers: 0 };
+        item.total++;
+        if (r.correct) item.correct++;
+        if (r.timedOut) item.timeouts++;
+        if (!r.timedOut) {
+          item.timeSum += r.seconds;
+          item.timedAnswers++;
+        }
+        map.set(key, item);
+      });
+
+      const rows = [...map.values()].map(item => {
+        const pct = item.total ? (100 * item.correct / item.total).toFixed(0) + "%" : "-";
+        const avg = item.timedAnswers ? (item.timeSum / item.timedAnswers).toFixed(2) + " s" : "-";
+        return `<tr><td>${item.a} × ${item.b}</td><td>${item.total}</td><td>${item.correct}</td><td>${pct}</td><td>${item.timeouts}</td><td>${avg}</td></tr>`;
+      }).join("");
+
+      el("comboStatsWrap").innerHTML = `
+        <table>
+          <thead><tr><th>Combination</th><th>Attempts</th><th>Correct</th><th>Accuracy</th><th>Timeouts</th><th>Avg time</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>`;
+    }
+
+    el("continueBtn").addEventListener("click", () => {
+      const selected = el("existingUser").value.trim();
+      const created = el("newUser").value.trim();
+      const name = created || selected;
+      if (!name) {
+        alert("Please enter or choose a pupil name.");
+        return;
+      }
+      currentUser = name;
+      ensureUser(currentUser);
+      populateUsers();
+      enterHome();
+    });
+
+    el("clearAllBtn").addEventListener("click", () => {
+      if (!confirm("Clear all locally stored pupil data for this page?")) return;
+      clearCookie(COOKIE_NAME);
+      data = { users: {} };
+      currentUser = "";
+      populateUsers();
+      el("newUser").value = "";
+    });
+
+    el("startRunBtn").addEventListener("click", startRun);
+    el("newRunBtn").addEventListener("click", startRun);
+    el("showStatsBtn").addEventListener("click", renderStats);
+    el("summaryStatsBtn").addEventListener("click", renderStats);
+    el("summaryHomeBtn").addEventListener("click", enterHome);
+    el("statsBackBtn").addEventListener("click", enterHome);
+    el("changeUserBtn").addEventListener("click", () => {
+      clearTimers();
+      populateUsers();
+      showScreen("screenUser");
+    });
+
+    el("answerInput").addEventListener("keydown", e => {
+      if (e.key === "Enter") {
+        submitAnswer(el("answerInput").value, false);
+      }
+    });
+
+    el("answerInput").addEventListener("input", e => {
+      e.target.value = e.target.value.replace(/[^0-9]/g, "");
+    });
+
+    populateUsers();
+    showScreen("screenUser");
+  </script>
+</body>
+</html>
