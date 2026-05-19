@@ -280,7 +280,7 @@
   <main class="app">
     <section id="screenUser" class="card">
       <h1>MTC Tables Test Simulator</h1>
-      <p>Choose a pupil name or create a new one. Results are stored locally in this browser using cookies.</p>
+      <p>Choose a pupil name or create a new one. Results are stored locally in this browser using local storage.</p>
 
       <div class="row">
         <div>
@@ -381,7 +381,8 @@
     const QUESTION_COUNT = 25;
     const ANSWER_SECONDS = 6;
     const BETWEEN_SECONDS = 3;
-    const COOKIE_NAME = "mtc_tables_test_data_v2";
+    const STORAGE_KEY = "mtc_tables_test_data_v3";
+    const LEGACY_COOKIE_NAMES = ["mtc_tables_test_data_v2", "mtc_tables_test_data_v1"];
 
     const el = id => document.getElementById(id);
 
@@ -411,24 +412,48 @@
       return document.cookie.split(";").map(s => s.trim()).find(s => s.startsWith(target))?.slice(target.length) || "";
     }
 
+    function clearCookie(name) {
+      document.cookie = `${encodeURIComponent(name)}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; SameSite=Lax`;
+    }
+
+    function normaliseData(parsed) {
+      if (!parsed || typeof parsed !== "object" || !parsed.users) return { users: {} };
+      Object.keys(parsed.users).forEach(name => {
+        if (!parsed.users[name] || typeof parsed.users[name] !== "object") {
+          parsed.users[name] = { attempts: [], runs: [] };
+        }
+        if (!Array.isArray(parsed.users[name].attempts)) parsed.users[name].attempts = [];
+        if (!Array.isArray(parsed.users[name].runs)) parsed.users[name].runs = [];
+      });
+      return parsed;
+    }
+
     function loadData() {
       try {
-        const raw = getCookie(COOKIE_NAME);
-        if (!raw) return { users: {} };
-        const parsed = JSON.parse(decodeURIComponent(raw));
-        if (!parsed || typeof parsed !== "object" || !parsed.users) return { users: {} };
-        return parsed;
-      } catch {
-        return { users: {} };
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) return normaliseData(JSON.parse(raw));
+      } catch {}
+
+      // Try to import older cookie-based data if present. This helps existing users migrate.
+      for (const cookieName of LEGACY_COOKIE_NAMES) {
+        try {
+          const rawCookie = getCookie(cookieName);
+          if (!rawCookie) continue;
+          const imported = normaliseData(JSON.parse(decodeURIComponent(rawCookie)));
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(imported));
+          return imported;
+        } catch {}
       }
+
+      return { users: {} };
     }
 
     function saveData() {
-      setCookie(COOKIE_NAME, JSON.stringify(data), 3650);
-    }
-
-    function clearCookie(name) {
-      document.cookie = `${encodeURIComponent(name)}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; SameSite=Lax`;
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      } catch (err) {
+        alert("The browser could not save the statistics locally. Local storage may be disabled or full.");
+      }
     }
 
     function ensureUser(name) {
@@ -791,7 +816,8 @@
 
     el("clearAllBtn").addEventListener("click", () => {
       if (!confirm("Clear all locally stored pupil data for this page?")) return;
-      clearCookie(COOKIE_NAME);
+      localStorage.removeItem(STORAGE_KEY);
+      LEGACY_COOKIE_NAMES.forEach(clearCookie);
       data = { users: {} };
       currentUser = "";
       populateUsers();
