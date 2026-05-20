@@ -1,0 +1,1477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Land Capture AR - Manual Calibration Game Over Fix</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: transparent; color: #fff; overflow: hidden; height: 100vh; }
+        #info { position: absolute; top: 20px; left: 20px; z-index: 100; background: rgba(0,0,0,0.7); padding: 15px 20px; border-radius: 10px; font-size: 14px; max-width: 300px; border: 1px solid rgba(255,255,255,0.1); }
+        #info h2 { font-size: 18px; margin-bottom: 10px; color: #ff6b6b; }
+        #info p { margin: 5px 0; color: #aaa; }
+        #info span { color: #4ecdc4; font-weight: bold; }
+        #debugLog { position: absolute; top: 20px; right: 20px; z-index: 100; background: rgba(0,0,0,0.9); padding: 10px 15px; border-radius: 8px; font-size: 12px; max-width: 350px; max-height: 200px; overflow-y: auto; border: 2px solid #ffff00; color: #ffff00; font-family: monospace; white-space: pre-wrap; }
+        #arButton { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); padding: 15px 40px; font-size: 18px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 30px; cursor: pointer; z-index: 100; font-weight: bold; box-shadow: 0 4px 20px rgba(102, 126, 234, 0.4); transition: all 0.3s ease; }
+        #arButton:hover { transform: translateX(-50%) scale(1.05); box-shadow: 0 6px 30px rgba(102, 126, 234, 0.6); }
+        #arButton:disabled { background: #555; cursor: not-allowed; box-shadow: none; }
+    </style>
+</head>
+<body>
+    <div id="info">
+        <h2>Land Capture AR</h2>
+        <p>Status: <span id="status">Select size</span></p>
+        <p>Current: <span id="currentPlayer">Player 1</span></p>
+        <p id="instruction">Enter a cube for 2s to select size</p>
+    </div>
+    <div id="debugLog"></div>
+    <button id="arButton">Enter AR</button>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
+
+        const SIZES = {
+            mini: { width: 0.8, label: 'Mini (80cm)' },
+            medium: { width: 1.3, label: 'Medium (130cm)' },
+            large: { width: 3.0, label: 'Large (300cm)' }
+        };
+
+        const GRAB_RADIUS = 0.05;
+        const DWELL_TIME = 2000;
+        const SAMPLE_DISTANCE = 0.03;
+        const SIMPLIFY_TOLERANCE = 0.01;
+        const SELF_INTERSECTION_EPS = 0.018;
+        const NEAR_REVISIT_EPS = 0.025;
+        const GAME_OVER_THRESHOLD = 10;
+        const MAX_DRAW_HEIGHT = 0.06;
+        const STORAGE_KEY = 'land-capture-ar-disabled-persistence';
+        const CALIBRATION_MIN_DISTANCE = 0.25;
+        const CALIBRATION_BUTTON_DEBOUNCE_MS = 350;
+
+        const COLORS = {
+            player1: 0xff4444,
+            player2: 0x4444ff,
+            frontier: 0xffff00,
+            markerValid: 0x00ff00,
+            markerFar: 0xff6600,
+            selectionCube: 0xffffff
+        };
+
+        const GameState = {
+            SIZE_SELECTION: 'SIZE_SELECTION',
+            POSITIONING: 'POSITIONING',
+            INITIAL_CALIBRATION_A: 'INITIAL_CALIBRATION_A',
+            INITIAL_CALIBRATION_B: 'INITIAL_CALIBRATION_B',
+            RECALIBRATION_A: 'RECALIBRATION_A',
+            RECALIBRATION_B: 'RECALIBRATION_B',
+            PLAYING: 'PLAYING',
+            GAME_OVER: 'GAME_OVER'
+        };
+
+        const state = {
+            current: GameState.SIZE_SELECTION,
+            selectedSize: null,
+            selectingController: null,
+            controllerIndex: null,
+            squarePosition: new THREE.Vector3(),
+            squareRotation: 0,
+            frontier: [],
+            currentPlayer: 1,
+            isDrawing: false,
+            currentPath: [],
+            startLocation: null,
+            score1: 50,
+            score2: 50
+        };
+
+        const calibrationState = {
+            session: null,
+            referenceSpace: null,
+            referenceSpaceResetHandler: null,
+            hiddenWhileInXR: false,
+            // localPoints stores the two original physical calibration points in the initial XR reference space.
+            // worldPoints stores the two physical points captured after a tracking/reference-space change.
+            localPoints: [],
+            worldPoints: [],
+            baseBoardPose: null,
+            resumeState: GameState.PLAYING,
+            reason: '',
+            lastCaptureTime: 0,
+            lastButtonStates: [[], []]
+        };
+
+        let debugMessages = [];
+        function debugLog(msg) {
+            const now = new Date();
+            const logLine = `[${now.toLocaleTimeString()}] ${msg}`;
+            debugMessages.push(logLine);
+            if (debugMessages.length > 15) debugMessages.shift();
+            const debugEl = document.getElementById('debugLog');
+            if (debugEl) debugEl.textContent = debugMessages.join('\n');
+            console.log(msg);
+        }
+
+        // Do not persist a game across page reloads.
+        // Closing the website or reopening the tab should always start from size selection.
+        function loadSavedBoard() { return null; }
+        function saveBoardState() {}
+        function clearSavedBoard() {}
+
+        function setBoardVisibility(visible) {
+            // The board, score labels and territory meshes can be hidden during recalibration.
+            // The GAME OVER sprite is special: it must only be visible when the game is
+            // actually in GAME_OVER. The previous version accidentally made it visible
+            // whenever the board was shown again after recalibration.
+            [gameSquare, scoreText1, scoreText2].forEach(obj => {
+                if (obj) obj.visible = visible;
+            });
+            if (gameOverText) {
+                gameOverText.visible = visible && state.current === GameState.GAME_OVER;
+            }
+        }
+
+        const scene = new THREE.Scene();
+        scene.background = null;
+
+        const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(0, 1.6, 3);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.xr.enabled = true;
+        renderer.setClearColor(0x000000, 0);
+        document.body.appendChild(renderer.domElement);
+
+        scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.4);
+        dirLight.position.set(5, 10, 5);
+        scene.add(dirLight);
+
+        const selectionCubes = [];
+        const sizeKeys = ['mini', 'medium', 'large'];
+
+        function makeTextSprite(text, color, width = 256, height = 64, font = 'bold 36px Arial') {
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = color;
+            ctx.font = font;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(text, width / 2, height / 2 + 2);
+            const texture = new THREE.CanvasTexture(canvas);
+            return new THREE.Sprite(new THREE.SpriteMaterial({ map: texture }));
+        }
+
+        function disposeObject3D(obj) {
+            if (!obj) return;
+            obj.traverse(child => {
+                if (child.geometry) child.geometry.dispose();
+                if (child.material) {
+                    const materials = Array.isArray(child.material) ? child.material : [child.material];
+                    materials.forEach(mat => {
+                        if (mat.map) mat.map.dispose();
+                        mat.dispose();
+                    });
+                }
+            });
+        }
+
+        function removeFromParent(obj) {
+            if (!obj) return;
+            if (obj.parent) obj.parent.remove(obj);
+            disposeObject3D(obj);
+        }
+
+        function createSizeCubes() {
+            const startX = -(0.5 * 1.5);
+            sizeKeys.forEach((key, index) => {
+                const material = new THREE.MeshStandardMaterial({
+                    color: COLORS.selectionCube,
+                    emissive: COLORS.selectionCube,
+                    emissiveIntensity: 0.2
+                });
+                const cube = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.25, 0.25), material);
+                cube.position.set(startX + index * 0.5, 1.5, -2);
+
+                const label = makeTextSprite(SIZES[key].label, 'white', 256, 64, 'bold 28px Arial');
+                label.scale.set(0.4, 0.1, 1);
+                label.position.y = 0.25;
+                cube.add(label);
+
+                cube.userData = { type: 'sizeCube', size: key };
+                scene.add(cube);
+                selectionCubes.push(cube);
+            });
+        }
+        createSizeCubes();
+
+        let gameSquare = null;
+        let player1Mesh = null;
+        let player2Mesh = null;
+        let frontierLine = null;
+        let markerMesh = null;
+        let drawnPathLine = null;
+        let controllerIndicator = null;
+        let scoreText1 = null;
+        let scoreText2 = null;
+        let gameOverText = null;
+        let previewSquare = null;
+        let controllerHintText = null;
+        let calibrationTip = null;
+
+        function createPreviewSquare(size) {
+            removeFromParent(previewSquare);
+            previewSquare = makeBoardBorder(size, 0.015, 0.005, new THREE.MeshBasicMaterial({
+                color: 0xffffff,
+                transparent: true,
+                opacity: 0.7
+            }));
+            previewSquare.position.y = 0.01;
+            scene.add(previewSquare);
+        }
+
+        function makeBoardBorder(size, lineThickness, lineHeight, material) {
+            const halfSize = size / 2;
+            const borderGroup = new THREE.Group();
+
+            const hLineGeo = new THREE.BoxGeometry(size, lineHeight, lineThickness);
+            const topLine = new THREE.Mesh(hLineGeo, material.clone());
+            topLine.position.set(0, lineHeight / 2, -halfSize + lineThickness / 2);
+            borderGroup.add(topLine);
+
+            const bottomLine = new THREE.Mesh(hLineGeo.clone(), material.clone());
+            bottomLine.position.set(0, lineHeight / 2, halfSize - lineThickness / 2);
+            borderGroup.add(bottomLine);
+
+            const vLineGeo = new THREE.BoxGeometry(lineThickness, lineHeight, size);
+            const leftLine = new THREE.Mesh(vLineGeo, material.clone());
+            leftLine.position.set(-halfSize + lineThickness / 2, lineHeight / 2, 0);
+            borderGroup.add(leftLine);
+
+            const rightLine = new THREE.Mesh(vLineGeo.clone(), material.clone());
+            rightLine.position.set(halfSize - lineThickness / 2, lineHeight / 2, 0);
+            borderGroup.add(rightLine);
+
+            material.dispose();
+            return borderGroup;
+        }
+
+        function restoreFrontier(points, size) {
+            const halfSize = size / 2;
+            if (!Array.isArray(points) || points.length < 2) {
+                return [
+                    new THREE.Vector3(0, 0.005, -halfSize),
+                    new THREE.Vector3(0, 0.005, halfSize)
+                ];
+            }
+            return points.map(p => new THREE.Vector3(Number(p.x) || 0, 0.005, Number(p.z) || 0));
+        }
+
+        function createGameSquare(size, options = {}) {
+            debugLog('createGameSquare: size=' + size);
+
+            [gameSquare, scoreText1, scoreText2, gameOverText].forEach(removeFromParent);
+            gameSquare = player1Mesh = player2Mesh = frontierLine = markerMesh = drawnPathLine = null;
+            scoreText1 = scoreText2 = gameOverText = null;
+            removeFromParent(previewSquare);
+            previewSquare = null;
+
+            gameSquare = new THREE.Group();
+            gameSquare.position.copy(state.squarePosition);
+            gameSquare.rotation.y = state.squareRotation;
+            scene.add(gameSquare);
+
+            const halfSize = size / 2;
+            state.frontier = restoreFrontier(options.frontier, size);
+            if (state.frontier.length < 2) {
+                state.frontier = [
+                    new THREE.Vector3(0, 0.005, -halfSize),
+                    new THREE.Vector3(0, 0.005, halfSize)
+                ];
+            }
+
+            const borderMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
+            const border = makeBoardBorder(size, 0.02, 0.02, borderMaterial);
+            gameSquare.add(border);
+
+            createScoreTexts();
+            createGameOverText();
+            updateTerritories();
+            updateFrontierLine();
+
+            markerMesh = new THREE.Mesh(
+                new THREE.BoxGeometry(0.03, 0.03, 0.03),
+                new THREE.MeshBasicMaterial({ color: COLORS.markerFar })
+            );
+            markerMesh.visible = false;
+            gameSquare.add(markerMesh);
+
+            drawnPathLine = new THREE.Group();
+            drawnPathLine.visible = false;
+            gameSquare.add(drawnPathLine);
+
+            controllerIndicator = new THREE.Mesh(
+                new THREE.BoxGeometry(0.02, 0.02, 0.02),
+                new THREE.MeshBasicMaterial({ color: state.currentPlayer === 1 ? COLORS.player1 : COLORS.player2 })
+            );
+            controllerIndicator.visible = false;
+
+            if (options.showGameOver) {
+                state.current = GameState.GAME_OVER;
+                gameOverText.visible = true;
+            }
+
+            positionFloatingText();
+            debugLog('createGameSquare: SUCCESS');
+        }
+
+        function createScoreTexts() {
+            scoreText1 = makeTextSprite('P1: 50.0%', '#ff4444');
+            scoreText1.scale.set(0.5, 0.125, 1);
+            scene.add(scoreText1);
+
+            scoreText2 = makeTextSprite('P2: 50.0%', '#4444ff');
+            scoreText2.scale.set(0.5, 0.125, 1);
+            scene.add(scoreText2);
+        }
+
+        function createGameOverText() {
+            gameOverText = makeTextSprite('GAME OVER', '#ff4444', 512, 128, 'bold 72px Arial');
+            gameOverText.scale.set(1.5, 0.375, 1);
+            gameOverText.visible = false;
+            scene.add(gameOverText);
+        }
+
+        function replaceSpriteText(sprite, text, color, width = 256, height = 64, font = 'bold 36px Arial') {
+            if (!sprite) return;
+            const oldMap = sprite.material.map;
+            const fresh = makeTextSprite(text, color, width, height, font);
+            sprite.material.map = fresh.material.map;
+            sprite.material.needsUpdate = true;
+            fresh.material.dispose();
+            if (oldMap) oldMap.dispose();
+        }
+
+        function updateScoreDisplay() {
+            replaceSpriteText(scoreText1, `P1: ${state.score1.toFixed(1)}%`, '#ff4444');
+            replaceSpriteText(scoreText2, `P2: ${state.score2.toFixed(1)}%`, '#4444ff');
+        }
+
+
+        function calibrationPromptText() {
+            if (state.current === GameState.INITIAL_CALIBRATION_A) return 'Point A: touch mark + press trigger/A/X';
+            if (state.current === GameState.INITIAL_CALIBRATION_B) return 'Point B: touch mark + press trigger/A/X';
+            if (state.current === GameState.RECALIBRATION_A) return 'Recalibrate A: same mark + trigger/A/X';
+            if (state.current === GameState.RECALIBRATION_B) return 'Recalibrate B: same mark + trigger/A/X';
+            return '';
+        }
+
+        function ensureControllerHintObjects() {
+            if (!controllerHintText) {
+                controllerHintText = makeTextSprite('', 'white', 1024, 128, 'bold 42px Arial');
+                controllerHintText.scale.set(0.7, 0.0875, 1);
+                controllerHintText.position.set(0, 0.16, -0.12);
+            }
+            if (!calibrationTip) {
+                calibrationTip = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.025, 0.025, 0.025),
+                    new THREE.MeshBasicMaterial({ color: 0xffffff })
+                );
+                calibrationTip.position.set(0, 0, -0.08);
+            }
+        }
+
+        function updateControllerHint() {
+            const shouldShow = isCalibrationState() && state.selectingController;
+            if (!shouldShow) {
+                if (controllerHintText) controllerHintText.visible = false;
+                if (calibrationTip) calibrationTip.visible = false;
+                return;
+            }
+
+            ensureControllerHintObjects();
+            if (controllerHintText.parent !== state.selectingController) {
+                if (controllerHintText.parent) controllerHintText.parent.remove(controllerHintText);
+                state.selectingController.add(controllerHintText);
+            }
+            if (calibrationTip.parent !== state.selectingController) {
+                if (calibrationTip.parent) calibrationTip.parent.remove(calibrationTip);
+                state.selectingController.add(calibrationTip);
+            }
+
+            replaceSpriteText(controllerHintText, calibrationPromptText(), 'white', 1024, 128, 'bold 42px Arial');
+            controllerHintText.visible = true;
+            calibrationTip.visible = true;
+        }
+
+        function positionFloatingText() {
+            if (!gameSquare) return;
+            if (scoreText1) {
+                scoreText1.position.set(gameSquare.position.x - 0.8, gameSquare.position.y + 0.5, gameSquare.position.z);
+                scoreText1.quaternion.copy(camera.quaternion);
+            }
+            if (scoreText2) {
+                scoreText2.position.set(gameSquare.position.x + 0.8, gameSquare.position.y + 0.5, gameSquare.position.z);
+                scoreText2.quaternion.copy(camera.quaternion);
+            }
+            if (gameOverText) {
+                gameOverText.position.set(gameSquare.position.x, gameSquare.position.y + 0.8, gameSquare.position.z);
+                gameOverText.quaternion.copy(camera.quaternion);
+            }
+        }
+
+        function clearDrawnPathVisuals() {
+            if (!drawnPathLine) return;
+            drawnPathLine.children.slice().forEach(child => removeFromParent(child));
+            drawnPathLine.visible = false;
+        }
+
+        function cancelDrawing(reason) {
+            if (!state.isDrawing) return;
+            debugLog('Drawing cancelled: ' + reason);
+            state.isDrawing = false;
+            state.currentPath = [];
+            clearDrawnPathVisuals();
+            if (markerMesh) markerMesh.visible = false;
+        }
+
+        function updateDrawnPathVisuals() {
+            if (!drawnPathLine || state.currentPath.length < 2) return;
+            drawnPathLine.children.slice().forEach(child => removeFromParent(child));
+
+            const segmentMaterial = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+            const segmentSize = 0.008;
+            for (let i = 0; i < state.currentPath.length - 1; i++) {
+                const start = state.currentPath[i];
+                const end = state.currentPath[i + 1];
+                const dir = new THREE.Vector3(end.x - start.x, 0, end.z - start.z);
+                const length = dir.length();
+                if (length < 0.001) continue;
+                dir.normalize();
+
+                const segmentMesh = new THREE.Mesh(
+                    new THREE.BoxGeometry(segmentSize, segmentSize, length),
+                    segmentMaterial.clone()
+                );
+                segmentMesh.position.set((start.x + end.x) / 2, 0.001, (start.z + end.z) / 2);
+                segmentMesh.rotation.y = Math.atan2(dir.x, dir.z);
+                drawnPathLine.add(segmentMesh);
+            }
+            segmentMaterial.dispose();
+            drawnPathLine.visible = true;
+        }
+
+        function closestPointOnSegment(point, segStart, segEnd) {
+            const dx = segEnd.x - segStart.x;
+            const dz = segEnd.z - segStart.z;
+            const lenSq = dx * dx + dz * dz;
+            if (lenSq === 0) {
+                return { point: segStart.clone(), t: 0, distance: point.distanceTo(segStart) };
+            }
+            let t = ((point.x - segStart.x) * dx + (point.z - segStart.z) * dz) / lenSq;
+            t = Math.max(0, Math.min(1, t));
+            const closestPoint = new THREE.Vector3(segStart.x + t * dx, 0, segStart.z + t * dz);
+            return { point: closestPoint, t, edgeIndex: -1, distance: point.distanceTo(closestPoint) };
+        }
+
+        function closestPointOnPolyline(point, polyline) {
+            let minDist = Infinity;
+            let closestInfo = null;
+            let cumulativeDist = 0;
+            for (let i = 0; i < polyline.length - 1; i++) {
+                const result = closestPointOnSegment(point, polyline[i], polyline[i + 1]);
+                if (result.distance < minDist) {
+                    minDist = result.distance;
+                    result.edgeIndex = i;
+                    result.s = cumulativeDist + result.t * polyline[i].distanceTo(polyline[i + 1]);
+                    closestInfo = result;
+                }
+                cumulativeDist += polyline[i].distanceTo(polyline[i + 1]);
+            }
+            return closestInfo || { point: point.clone(), distance: Infinity, s: 0, edgeIndex: -1 };
+        }
+
+        function polygonArea(points) {
+            if (points.length < 3) return 0;
+            let area = 0;
+            for (let i = 0; i < points.length; i++) {
+                const j = (i + 1) % points.length;
+                area += points[i].x * (-points[j].z);
+                area -= points[j].x * (-points[i].z);
+            }
+            return Math.abs(area) / 2;
+        }
+
+        function createFilledPolygon(points, color) {
+            if (points.length < 3) {
+                return new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.3 }));
+            }
+            try {
+                const shape = new THREE.Shape();
+                shape.moveTo(points[0].x, -points[0].z);
+                for (let i = 1; i < points.length; i++) shape.lineTo(points[i].x, -points[i].z);
+                shape.closePath();
+
+                const mesh = new THREE.Mesh(
+                    new THREE.ShapeGeometry(shape),
+                    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.3, side: THREE.DoubleSide })
+                );
+                mesh.rotation.x = -Math.PI / 2;
+                mesh.position.y = 0.005;
+                return mesh;
+            } catch (error) {
+                debugLog('Polygon creation failed: ' + error.message);
+                return new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.3 }));
+            }
+        }
+
+        function cross2(a, b, c) {
+            return (b.x - a.x) * (c.z - a.z) - (b.z - a.z) * (c.x - a.x);
+        }
+
+        function pointDistance2D(a, b) {
+            const dx = a.x - b.x;
+            const dz = a.z - b.z;
+            return Math.sqrt(dx * dx + dz * dz);
+        }
+
+        function lineIntersectionPoint(p1, p2, p3, p4) {
+            const x1 = p1.x, z1 = p1.z, x2 = p2.x, z2 = p2.z;
+            const x3 = p3.x, z3 = p3.z, x4 = p4.x, z4 = p4.z;
+            const denom = (x1 - x2) * (z3 - z4) - (z1 - z2) * (x3 - x4);
+            if (Math.abs(denom) < 1e-9) return null;
+            const px = ((x1 * z2 - z1 * x2) * (x3 - x4) - (x1 - x2) * (x3 * z4 - z3 * x4)) / denom;
+            const pz = ((x1 * z2 - z1 * x2) * (z3 - z4) - (z1 - z2) * (x3 * z4 - z3 * x4)) / denom;
+            return new THREE.Vector3(px, 0, pz);
+        }
+
+        function segmentsIntersectTolerant(p1, p2, p3, p4, eps = SELF_INTERSECTION_EPS) {
+            const d1 = cross2(p1, p2, p3);
+            const d2 = cross2(p1, p2, p4);
+            const d3 = cross2(p3, p4, p1);
+            const d4 = cross2(p3, p4, p2);
+
+            if (!(((d1 > eps && d2 < -eps) || (d1 < -eps && d2 > eps)) &&
+                  ((d3 > eps && d4 < -eps) || (d3 < -eps && d4 > eps)))) {
+                return false;
+            }
+
+            const ip = lineIntersectionPoint(p1, p2, p3, p4);
+            if (!ip) return false;
+
+            const nearEndpoint = [p1, p2, p3, p4].some(p => pointDistance2D(ip, p) < eps);
+            return !nearEndpoint;
+        }
+
+        function polylineSelfIntersects(polyline, eps = SELF_INTERSECTION_EPS) {
+            for (let i = 0; i < polyline.length - 2; i++) {
+                for (let j = i + 2; j < polyline.length - 1; j++) {
+                    if (i === 0 && j === polyline.length - 2) continue;
+                    if (segmentsIntersectTolerant(polyline[i], polyline[i + 1], polyline[j], polyline[j + 1], eps)) return true;
+                }
+            }
+            return false;
+        }
+
+        function perpendicularDistance(point, lineStart, lineEnd) {
+            const dx = lineEnd.x - lineStart.x;
+            const dz = lineEnd.z - lineStart.z;
+            const len = Math.sqrt(dx * dx + dz * dz);
+            if (len === 0) return point.distanceTo(lineStart);
+            return Math.abs((dz * point.x - dx * point.z + lineEnd.x * lineStart.z - lineEnd.z * lineStart.x) / len);
+        }
+
+        function simplifyPathRDP(points, tolerance) {
+            if (points.length < 3) return points;
+            let maxDist = 0;
+            let maxIndex = 0;
+            const first = points[0];
+            const last = points[points.length - 1];
+            for (let i = 1; i < points.length - 1; i++) {
+                const dist = perpendicularDistance(points[i], first, last);
+                if (dist > maxDist) {
+                    maxDist = dist;
+                    maxIndex = i;
+                }
+            }
+            if (maxDist > tolerance) {
+                const left = simplifyPathRDP(points.slice(0, maxIndex + 1), tolerance);
+                const right = simplifyPathRDP(points.slice(maxIndex), tolerance);
+                return left.slice(0, -1).concat(right);
+            }
+            return [first, last];
+        }
+
+        function removeTinyRevisitLoops(points, eps = NEAR_REVISIT_EPS) {
+            const cleaned = points.map(p => p.clone());
+            let changed = true;
+            while (changed) {
+                changed = false;
+                outer:
+                for (let i = 0; i < cleaned.length - 4; i++) {
+                    for (let j = i + 3; j < cleaned.length - 1; j++) {
+                        if (pointDistance2D(cleaned[i], cleaned[j]) < eps) {
+                            cleaned.splice(i + 1, j - i - 1);
+                            changed = true;
+                            break outer;
+                        }
+                    }
+                }
+            }
+            return cleaned;
+        }
+
+        function cleanDrawnPath(points, startPoint, endPoint) {
+            const result = [];
+            for (const p of points) {
+                if (result.length === 0 || pointDistance2D(p, result[result.length - 1]) > 0.006) {
+                    result.push(p.clone());
+                }
+            }
+            if (result.length === 0) return [startPoint.clone(), endPoint.clone()];
+            result[0] = startPoint.clone();
+            result[result.length - 1] = endPoint.clone();
+            return removeTinyRevisitLoops(result);
+        }
+
+        function worldToSquareLocal(worldPos, flatten = true) {
+            if (!gameSquare) return worldPos.clone();
+            const local = gameSquare.worldToLocal(worldPos.clone());
+            if (flatten) local.y = 0;
+            return local;
+        }
+
+        function getPlayer1PolygonLocal() {
+            const halfSize = SIZES[state.selectedSize].width / 2;
+            if (state.frontier.length === 2) {
+                return [
+                    new THREE.Vector3(-halfSize, 0.001, -halfSize),
+                    new THREE.Vector3(0, 0.001, -halfSize),
+                    new THREE.Vector3(0, 0.001, halfSize),
+                    new THREE.Vector3(-halfSize, 0.001, halfSize)
+                ];
+            }
+            return [
+                new THREE.Vector3(-halfSize, 0.001, -halfSize),
+                ...state.frontier.map(p => p.clone()),
+                new THREE.Vector3(-halfSize, 0.001, halfSize)
+            ];
+        }
+
+        function getPlayer2PolygonLocal() {
+            const halfSize = SIZES[state.selectedSize].width / 2;
+            if (state.frontier.length === 2) {
+                return [
+                    new THREE.Vector3(0, 0.001, -halfSize),
+                    new THREE.Vector3(halfSize, 0.001, -halfSize),
+                    new THREE.Vector3(halfSize, 0.001, halfSize),
+                    new THREE.Vector3(0, 0.001, halfSize)
+                ];
+            }
+            const polygon = [
+                state.frontier[0].clone(),
+                new THREE.Vector3(halfSize, 0.001, -halfSize),
+                new THREE.Vector3(halfSize, 0.001, halfSize),
+                state.frontier[state.frontier.length - 1].clone()
+            ];
+            for (let i = state.frontier.length - 1; i >= 0; i--) polygon.push(state.frontier[i].clone());
+            return polygon;
+        }
+
+        function updateTerritories() {
+            if (!gameSquare || !state.selectedSize) return;
+            if (player1Mesh) removeFromParent(player1Mesh);
+            if (player2Mesh) removeFromParent(player2Mesh);
+
+            const p1Points = getPlayer1PolygonLocal();
+            const p2Points = getPlayer2PolygonLocal();
+            player1Mesh = createFilledPolygon(p1Points, COLORS.player1);
+            player2Mesh = createFilledPolygon(p2Points, COLORS.player2);
+            gameSquare.add(player1Mesh);
+            gameSquare.add(player2Mesh);
+
+            const size = SIZES[state.selectedSize].width;
+            const area1 = polygonArea(p1Points);
+            state.score1 = (area1 / (size * size)) * 100;
+            state.score2 = 100 - state.score1;
+            updateScoreDisplay();
+        }
+
+        function updateFrontierLine() {
+            if (!gameSquare || state.frontier.length < 2) return;
+            if (frontierLine) removeFromParent(frontierLine);
+
+            frontierLine = new THREE.Group();
+            const lineThickness = 0.008;
+            const lineHeight = 0.008;
+            const frontierMaterial = new THREE.MeshBasicMaterial({ color: COLORS.frontier, side: THREE.DoubleSide });
+
+            for (let i = 0; i < state.frontier.length - 1; i++) {
+                const start = state.frontier[i];
+                const end = state.frontier[i + 1];
+                const dir = new THREE.Vector3(end.x - start.x, 0, end.z - start.z);
+                const length = dir.length();
+                if (length < 0.001) continue;
+                dir.normalize();
+
+                const segMesh = new THREE.Mesh(
+                    new THREE.BoxGeometry(lineThickness, lineHeight, length),
+                    frontierMaterial.clone()
+                );
+                segMesh.position.set((start.x + end.x) / 2, lineHeight / 2, (start.z + end.z) / 2);
+                segMesh.rotation.y = Math.atan2(dir.x, dir.z);
+                frontierLine.add(segMesh);
+            }
+            frontierMaterial.dispose();
+            gameSquare.add(frontierLine);
+        }
+
+        function replaceFrontierSegment(startLoc, endLoc, drawnPath) {
+            if (startLoc.edgeIndex === -1 || endLoc.edgeIndex === -1) return null;
+
+            let startPoint = startLoc.point.clone();
+            let endPoint = endLoc.point.clone();
+            let path = drawnPath.map(p => p.clone());
+            let a = startLoc;
+            let b = endLoc;
+
+            if (startLoc.s > endLoc.s) {
+                [startPoint, endPoint] = [endPoint, startPoint];
+                [a, b] = [b, a];
+                path = path.reverse();
+            }
+
+            path = cleanDrawnPath(path, startPoint, endPoint);
+
+            const newFront = [];
+            for (let i = 0; i <= a.edgeIndex; i++) newFront.push(state.frontier[i].clone());
+            newFront.push(startPoint);
+            for (let i = 1; i < path.length - 1; i++) newFront.push(path[i].clone());
+            newFront.push(endPoint);
+            for (let i = b.edgeIndex + 1; i < state.frontier.length; i++) newFront.push(state.frontier[i].clone());
+
+            const cleaned = [newFront[0]];
+            for (let i = 1; i < newFront.length; i++) {
+                if (pointDistance2D(newFront[i], cleaned[cleaned.length - 1]) > 0.001) cleaned.push(newFront[i]);
+            }
+            return cleaned;
+        }
+
+        function validateMove(startLoc, endLoc, drawnPath) {
+            debugLog('validateMove: pathLen=' + drawnPath.length);
+
+            if (drawnPath.length < 3) {
+                debugLog('  rejected: path too short');
+                return { valid: false, reason: 'path too short' };
+            }
+
+            const cleanedPath = cleanDrawnPath(drawnPath, startLoc.point, endLoc.point);
+            const simplified = simplifyPathRDP(cleanedPath, SIMPLIFY_TOLERANCE);
+
+            if (polylineSelfIntersects(simplified)) {
+                debugLog('  rejected: clear self-intersection');
+                return { valid: false, reason: 'path self-intersects' };
+            }
+
+            const halfSize = SIZES[state.selectedSize].width / 2;
+            for (const p of simplified) {
+                if (Math.abs(p.x) > halfSize + 0.01 || Math.abs(p.z) > halfSize + 0.01) {
+                    debugLog('  rejected: path outside bounds');
+                    return { valid: false, reason: 'path outside bounds' };
+                }
+            }
+
+            if (startLoc.edgeIndex === endLoc.edgeIndex && Math.abs(startLoc.t - endLoc.t) < 0.05) {
+                debugLog('  rejected: start/end too close');
+                return { valid: false, reason: 'start/end too close' };
+            }
+
+            const oldArea = polygonArea(state.currentPlayer === 1 ? getPlayer1PolygonLocal() : getPlayer2PolygonLocal());
+            const tempFrontier = replaceFrontierSegment(startLoc, endLoc, simplified);
+            if (!tempFrontier || polylineSelfIntersects(tempFrontier)) {
+                debugLog('  rejected: new frontier invalid');
+                return { valid: false, reason: 'new frontier invalid' };
+            }
+
+            const savedFrontier = state.frontier;
+            state.frontier = tempFrontier;
+            const newArea = polygonArea(state.currentPlayer === 1 ? getPlayer1PolygonLocal() : getPlayer2PolygonLocal());
+            state.frontier = savedFrontier;
+
+            debugLog(`  oldArea=${oldArea.toFixed(4)} newArea=${newArea.toFixed(4)}`);
+            if (newArea <= oldArea + 1e-6) {
+                debugLog('  rejected: no captured area');
+                return { valid: false, reason: 'no captured area' };
+            }
+
+            debugLog('  accepted');
+            return { valid: true, path: simplified };
+        }
+
+        const controllerModelFactory = new XRControllerModelFactory();
+        let controller1, controller2;
+
+        function setupControllers() {
+            controller1 = renderer.xr.getController(0);
+            controller1.addEventListener('selectstart', onSelectStart);
+            controller1.addEventListener('selectend', onSelectEnd);
+            controller1.addEventListener('connected', event => { controller1.userData.inputSource = event.data; });
+            controller1.addEventListener('disconnected', () => { controller1.userData.inputSource = null; });
+            scene.add(controller1);
+
+            controller2 = renderer.xr.getController(1);
+            controller2.addEventListener('selectstart', onSelectStart);
+            controller2.addEventListener('selectend', onSelectEnd);
+            controller2.addEventListener('connected', event => { controller2.userData.inputSource = event.data; });
+            controller2.addEventListener('disconnected', () => { controller2.userData.inputSource = null; });
+            scene.add(controller2);
+
+            const grip1 = renderer.xr.getControllerGrip(0);
+            grip1.add(controllerModelFactory.createControllerModel(grip1));
+            scene.add(grip1);
+
+            const grip2 = renderer.xr.getControllerGrip(1);
+            grip2.add(controllerModelFactory.createControllerModel(grip2));
+            scene.add(grip2);
+        }
+        setupControllers();
+
+        let dwellTarget = null;
+        let dwellStartTime = null;
+
+        function getControllerIndex(controller) {
+            if (controller === controller1) return 0;
+            if (controller === controller2) return 1;
+            return null;
+        }
+
+        function getIndicatorWorldPosition(controller) {
+            const indicatorWorldPos = new THREE.Vector3(0, 0, -0.08);
+            indicatorWorldPos.applyQuaternion(controller.quaternion);
+            indicatorWorldPos.add(controller.position);
+            return indicatorWorldPos;
+        }
+
+        function isCalibrationState() {
+            return state.current === GameState.INITIAL_CALIBRATION_A ||
+                state.current === GameState.INITIAL_CALIBRATION_B ||
+                state.current === GameState.RECALIBRATION_A ||
+                state.current === GameState.RECALIBRATION_B;
+        }
+
+        function resumeAfterCalibration() {
+            const resume = calibrationState.resumeState === GameState.GAME_OVER ? GameState.GAME_OVER : GameState.PLAYING;
+            state.current = resume;
+            setBoardVisibility(true);
+            if (markerMesh) markerMesh.visible = false;
+            updateUI();
+        }
+
+        function applyTwoPointCalibration(worldA, worldB) {
+            if (calibrationState.localPoints.length !== 2 || !gameSquare || !calibrationState.baseBoardPose) return false;
+
+            const baseA = calibrationState.localPoints[0];
+            const baseB = calibrationState.localPoints[1];
+            const baseVector = new THREE.Vector2(baseB.x - baseA.x, baseB.z - baseA.z);
+            const worldVector = new THREE.Vector2(worldB.x - worldA.x, worldB.z - worldA.z);
+
+            if (baseVector.length() < CALIBRATION_MIN_DISTANCE || worldVector.length() < CALIBRATION_MIN_DISTANCE) {
+                debugLog('Calibration rejected: points too close together');
+                return false;
+            }
+
+            const baseAngle = Math.atan2(baseVector.x, baseVector.y);
+            const worldAngle = Math.atan2(worldVector.x, worldVector.y);
+            const yawDelta = worldAngle - baseAngle;
+            const c = Math.cos(yawDelta);
+            const s = Math.sin(yawDelta);
+
+            const rotateXZ = (p) => ({
+                x: c * p.x + s * p.z,
+                z: -s * p.x + c * p.z
+            });
+
+            const rotatedBaseA = rotateXZ(baseA);
+            const tx = worldA.x - rotatedBaseA.x;
+            const tz = worldA.z - rotatedBaseA.z;
+
+            const rotatedBoard = rotateXZ(calibrationState.baseBoardPose);
+            const newYaw = calibrationState.baseBoardPose.yaw + yawDelta;
+
+            gameSquare.position.set(rotatedBoard.x + tx, 0, rotatedBoard.z + tz);
+            gameSquare.rotation.set(0, newYaw, 0);
+            state.squarePosition.copy(gameSquare.position);
+            state.squareRotation = newYaw;
+
+            debugLog('Two-point calibration applied');
+            return true;
+        }
+
+        function startRecalibration(reason) {
+            if (!gameSquare || calibrationState.localPoints.length !== 2 || !calibrationState.baseBoardPose) return;
+            if (state.current === GameState.SIZE_SELECTION || state.current === GameState.POSITIONING ||
+                state.current === GameState.INITIAL_CALIBRATION_A || state.current === GameState.INITIAL_CALIBRATION_B) return;
+
+            debugLog('Recalibration requested: ' + reason);
+            if (state.isDrawing) cancelDrawing('tracking/reference-space changed');
+            if (markerMesh) markerMesh.visible = false;
+            clearDrawnPathVisuals();
+            calibrationState.reason = reason;
+            calibrationState.worldPoints = [];
+            calibrationState.resumeState = state.current === GameState.GAME_OVER ? GameState.GAME_OVER : GameState.PLAYING;
+            state.current = GameState.RECALIBRATION_A;
+            setBoardVisibility(false);
+            primeCalibrationButtonStates();
+            updateUI();
+        }
+
+        function captureCalibrationPoint(controller, source = 'trigger') {
+            const now = performance.now();
+            if (now - calibrationState.lastCaptureTime < CALIBRATION_BUTTON_DEBOUNCE_MS) return;
+            calibrationState.lastCaptureTime = now;
+
+            if (!isCalibrationState()) return;
+            if (!state.selectingController) {
+                state.selectingController = controller;
+                state.controllerIndex = getControllerIndex(controller);
+            }
+            if (controller !== state.selectingController) {
+                debugLog('Calibration input ignored: use the active controller');
+                return;
+            }
+
+            const world = getIndicatorWorldPosition(controller);
+            world.y = 0;
+
+            if (state.current === GameState.INITIAL_CALIBRATION_A) {
+                calibrationState.localPoints = [{ x: world.x, z: world.z }];
+                calibrationState.worldPoints = [];
+                calibrationState.baseBoardPose = null;
+                debugLog('Initial calibration point A set by ' + source);
+                state.current = GameState.INITIAL_CALIBRATION_B;
+                primeCalibrationButtonStates();
+                updateUI();
+                return;
+            }
+
+            if (state.current === GameState.INITIAL_CALIBRATION_B) {
+                const first = calibrationState.localPoints[0];
+                const second = { x: world.x, z: world.z };
+                const distance = Math.hypot(second.x - first.x, second.z - first.z);
+                if (distance < CALIBRATION_MIN_DISTANCE) {
+                    debugLog('Initial calibration point B rejected: too close to A');
+                    return;
+                }
+                calibrationState.localPoints.push(second);
+                calibrationState.resumeState = GameState.PLAYING;
+                debugLog('Initial calibration point B set by ' + source);
+                createPreviewSquare(SIZES[state.selectedSize].width);
+                state.current = GameState.POSITIONING;
+                updateUI();
+                return;
+            }
+
+            if (!gameSquare) return;
+
+            if (state.current === GameState.RECALIBRATION_A) {
+                calibrationState.worldPoints = [{ x: world.x, z: world.z }];
+                debugLog('Recalibration point A captured by ' + source);
+                state.current = GameState.RECALIBRATION_B;
+                primeCalibrationButtonStates();
+                updateUI();
+                return;
+            }
+
+            if (state.current === GameState.RECALIBRATION_B) {
+                const first = calibrationState.worldPoints[0];
+                const second = { x: world.x, z: world.z };
+                const distance = Math.hypot(second.x - first.x, second.z - first.z);
+                if (distance < CALIBRATION_MIN_DISTANCE) {
+                    debugLog('Recalibration point B rejected: too close to A');
+                    return;
+                }
+                if (applyTwoPointCalibration(first, second)) {
+                    calibrationState.worldPoints = [];
+                    resumeAfterCalibration();
+                }
+            }
+        }
+
+        function primeCalibrationButtonStates() {
+            [controller1, controller2].forEach((controller, controllerIndex) => {
+                const inputSource = controller && controller.userData.inputSource;
+                const gamepad = inputSource && inputSource.gamepad;
+                calibrationState.lastButtonStates[controllerIndex] = gamepad && gamepad.buttons
+                    ? Array.from(gamepad.buttons, button => Boolean(button && button.pressed))
+                    : [];
+            });
+            calibrationState.lastCaptureTime = performance.now();
+        }
+
+        function pollCalibrationButtons() {
+            if (!isCalibrationState()) return;
+            [controller1, controller2].forEach((controller, controllerIndex) => {
+                if (!controller) return;
+                const inputSource = controller.userData.inputSource;
+                const gamepad = inputSource && inputSource.gamepad;
+                if (!gamepad || !gamepad.buttons) return;
+
+                const previous = calibrationState.lastButtonStates[controllerIndex] || [];
+                const current = Array.from(gamepad.buttons, button => Boolean(button && button.pressed));
+
+                for (let i = 0; i < current.length; i++) {
+                    const justPressed = current[i] && !previous[i];
+                    if (justPressed) {
+                        captureCalibrationPoint(controller, 'button');
+                        break;
+                    }
+                }
+                calibrationState.lastButtonStates[controllerIndex] = current;
+            });
+        }
+
+        function onSelectStart(event) {
+            const controller = event.target;
+            const isSelectingController = controller === state.selectingController;
+            debugLog('onSelectStart: state=' + state.current);
+
+            if (isCalibrationState()) {
+                captureCalibrationPoint(controller, 'trigger');
+                return;
+            }
+
+            if (state.current === GameState.POSITIONING && !gameSquare) {
+                if (!isSelectingController) {
+                    debugLog('onSelectStart rejected: not selecting controller');
+                    return;
+                }
+
+                state.squarePosition.set(controller.position.x, 0, controller.position.z);
+                const euler = new THREE.Euler().setFromQuaternion(controller.quaternion, 'YXZ');
+                state.squareRotation = euler.y;
+
+                calibrationState.baseBoardPose = {
+                    x: state.squarePosition.x,
+                    z: state.squarePosition.z,
+                    yaw: state.squareRotation
+                };
+                calibrationState.worldPoints = [];
+                calibrationState.resumeState = GameState.PLAYING;
+
+                createGameSquare(SIZES[state.selectedSize].width);
+                state.current = GameState.PLAYING;
+                updateUI();
+                return;
+            }
+
+            if (state.current === GameState.PLAYING && !state.isDrawing) {
+                if (!isSelectingController) return;
+
+                const indicatorLocal = worldToSquareLocal(getIndicatorWorldPosition(controller));
+                const closest = closestPointOnPolyline(indicatorLocal, state.frontier);
+                const distanceFromIndicator = pointDistance2D(indicatorLocal, closest.point);
+                debugLog('PLAYING: indicatorDist=' + distanceFromIndicator.toFixed(3));
+
+                if (distanceFromIndicator <= GRAB_RADIUS) {
+                    state.isDrawing = true;
+                    state.startLocation = closest;
+                    state.currentPath = [closest.point.clone(), indicatorLocal.clone()];
+                    if (drawnPathLine) drawnPathLine.visible = true;
+                }
+            }
+        }
+
+        function onSelectEnd(event) {
+            const controller = event.target;
+            if (state.current === GameState.PLAYING && state.isDrawing && controller === state.selectingController) {
+                const indicatorLocal = worldToSquareLocal(getIndicatorWorldPosition(controller));
+                finishDrawingAtPosition(indicatorLocal);
+            }
+        }
+
+        function updateUI() {
+            const statusEl = document.getElementById('status');
+            const currentEl = document.getElementById('currentPlayer');
+            const instructionEl = document.getElementById('instruction');
+
+            if (state.current === GameState.INITIAL_CALIBRATION_A) {
+                statusEl.textContent = 'Set calibration point A';
+                currentEl.textContent = '-';
+                instructionEl.textContent = 'Use the active controller: touch physical point A and press trigger or A/X';
+                return;
+            }
+
+            if (state.current === GameState.INITIAL_CALIBRATION_B) {
+                statusEl.textContent = 'Set calibration point B';
+                currentEl.textContent = '-';
+                instructionEl.textContent = 'Touch physical point B and press trigger or A/X';
+                return;
+            }
+
+            if (state.current === GameState.RECALIBRATION_A) {
+                statusEl.textContent = 'Recalibrate point A';
+                currentEl.textContent = '-';
+                instructionEl.textContent = 'Touch the original point A and press trigger or A/X';
+                return;
+            }
+
+            if (state.current === GameState.RECALIBRATION_B) {
+                statusEl.textContent = 'Recalibrate point B';
+                currentEl.textContent = '-';
+                instructionEl.textContent = 'Touch the original point B and press trigger or A/X';
+                return;
+            }
+
+            statusEl.textContent = state.current === GameState.SIZE_SELECTION ? 'Select size' :
+                state.current === GameState.POSITIONING ? 'Position square' :
+                state.current === GameState.GAME_OVER ? 'Game Over!' :
+                `Player ${state.currentPlayer}'s turn`;
+
+            currentEl.textContent = state.current === GameState.PLAYING ? `Player ${state.currentPlayer}` : '-';
+
+            instructionEl.textContent = state.current === GameState.SIZE_SELECTION ? 'Enter a cube for 2s to select size' :
+                state.current === GameState.POSITIONING ? 'Place square and press trigger to lock it' :
+                state.current === GameState.GAME_OVER ? 'Refresh page or press R to restart' :
+                'Click trigger near frontier to draw curve';
+        }
+
+        function checkDwellTime() {
+            if (state.current !== GameState.SIZE_SELECTION) return;
+            const now = Date.now();
+
+            for (const cube of selectionCubes) {
+                if (!cube.visible) continue;
+                const d1 = controller1 ? controller1.position.distanceTo(cube.position) : Infinity;
+                const d2 = controller2 ? controller2.position.distanceTo(cube.position) : Infinity;
+                const minDist = Math.min(d1, d2);
+
+                if (minDist < 0.2) {
+                    if (dwellTarget !== cube) {
+                        if (dwellTarget) dwellTarget.material.emissive.setHex(COLORS.selectionCube);
+                        dwellTarget = cube;
+                        dwellStartTime = now;
+                        cube.material.emissive.setHex(0x00ff00);
+                    } else if (now - dwellStartTime >= DWELL_TIME) {
+                        state.selectedSize = cube.userData.size;
+                        state.selectingController = d1 < d2 ? controller1 : controller2;
+                        state.controllerIndex = d1 < d2 ? 0 : 1;
+                        selectionCubes.forEach(c => c.visible = false);
+                        calibrationState.localPoints = [];
+                        calibrationState.worldPoints = [];
+                        calibrationState.baseBoardPose = null;
+                        state.current = GameState.INITIAL_CALIBRATION_A;
+                        primeCalibrationButtonStates();
+                        updateUI();
+                        dwellTarget = null;
+                        dwellStartTime = null;
+                    }
+                } else if (dwellTarget === cube) {
+                    cube.material.emissive.setHex(COLORS.selectionCube);
+                    dwellTarget = null;
+                    dwellStartTime = null;
+                }
+            }
+        }
+
+        function finishDrawingAtPosition(localPos) {
+            state.isDrawing = false;
+            clearDrawnPathVisuals();
+            if (markerMesh) markerMesh.visible = false;
+
+            const endClosest = closestPointOnPolyline(localPos, state.frontier);
+            const distanceFromIndicator = pointDistance2D(localPos, endClosest.point);
+            if (distanceFromIndicator > GRAB_RADIUS) {
+                debugLog('finish rejected: endpoint too far');
+                state.currentPath = [];
+                return;
+            }
+
+            const rawPath = [...state.currentPath, localPos.clone(), endClosest.point.clone()];
+            const cleanedPath = cleanDrawnPath(rawPath, state.startLocation.point, endClosest.point);
+            const validation = validateMove(state.startLocation, endClosest, cleanedPath);
+
+            if (!validation.valid) {
+                state.currentPath = [];
+                return;
+            }
+
+            const newFrontier = replaceFrontierSegment(state.startLocation, endClosest, validation.path);
+            if (!newFrontier) {
+                state.currentPath = [];
+                return;
+            }
+
+            state.frontier = newFrontier;
+            updateTerritories();
+            updateFrontierLine();
+            state.currentPlayer = state.currentPlayer === 1 ? 2 : 1;
+            if (controllerIndicator) controllerIndicator.material.color.setHex(state.currentPlayer === 1 ? COLORS.player1 : COLORS.player2);
+
+            if (state.score1 < GAME_OVER_THRESHOLD || state.score2 < GAME_OVER_THRESHOLD) {
+                state.current = GameState.GAME_OVER;
+                if (gameOverText) gameOverText.visible = true;
+            }
+
+            updateUI();
+            state.currentPath = [];
+        }
+
+        function restoreGameFromSavedData(saved) {
+            // Persistent game restoration is intentionally disabled.
+            // A fresh website load should always start from size selection.
+            return;
+        }
+
+        function tryRestoreSavedBoardForCalibration() {
+            return;
+        }
+
+        function attachReferenceSpaceResetHandler() {
+            if (!calibrationState.referenceSpace || calibrationState.referenceSpaceResetHandler) return;
+            calibrationState.referenceSpaceResetHandler = () => {
+                startRecalibration('XR reference space reset');
+            };
+            try {
+                calibrationState.referenceSpace.addEventListener('reset', calibrationState.referenceSpaceResetHandler);
+                debugLog('Reference-space reset handler attached');
+            } catch (error) {
+                debugLog('Could not attach reference-space reset handler: ' + error.message);
+            }
+        }
+
+        function detachReferenceSpaceResetHandler() {
+            if (calibrationState.referenceSpace && calibrationState.referenceSpaceResetHandler) {
+                try {
+                    calibrationState.referenceSpace.removeEventListener('reset', calibrationState.referenceSpaceResetHandler);
+                } catch (_) {}
+            }
+            calibrationState.referenceSpaceResetHandler = null;
+        }
+
+        function update(frame) {
+            if (calibrationState.session && !calibrationState.referenceSpace) {
+                calibrationState.referenceSpace = renderer.xr.getReferenceSpace();
+                attachReferenceSpaceResetHandler();
+                tryRestoreSavedBoardForCalibration();
+            }
+
+            pollCalibrationButtons();
+            updateControllerHint();
+            checkDwellTime();
+
+            if (state.current === GameState.POSITIONING && state.selectingController && previewSquare) {
+                const pos = state.selectingController.position;
+                previewSquare.position.x = pos.x;
+                previewSquare.position.z = pos.z;
+                const euler = new THREE.Euler().setFromQuaternion(state.selectingController.quaternion, 'YXZ');
+                previewSquare.rotation.y = euler.y;
+            }
+
+            if (state.current === GameState.PLAYING && state.selectingController) {
+                const activeController = state.controllerIndex === 0 ? controller1 : controller2;
+
+                if (!activeController) {
+                    if (controllerIndicator) controllerIndicator.visible = false;
+                } else {
+                    if (controllerIndicator && !controllerIndicator.parent) activeController.add(controllerIndicator);
+                    if (controllerIndicator) {
+                        controllerIndicator.position.set(0, 0, -0.08);
+                        controllerIndicator.visible = true;
+                        controllerIndicator.material.color.setHex(state.currentPlayer === 1 ? COLORS.player1 : COLORS.player2);
+                    }
+
+                    const indicatorWorldPos = getIndicatorWorldPosition(activeController);
+                    const indicatorLocalRaw = worldToSquareLocal(indicatorWorldPos, false);
+
+                    if (state.isDrawing && indicatorLocalRaw.y > MAX_DRAW_HEIGHT) {
+                        cancelDrawing('controller too high (' + indicatorLocalRaw.y.toFixed(3) + 'm above board)');
+                    }
+                    const indicatorLocal = indicatorLocalRaw.clone();
+                    indicatorLocal.y = 0;
+
+                    const closest = closestPointOnPolyline(indicatorLocal, state.frontier);
+
+                    if (!state.isDrawing && markerMesh) {
+                        const distanceFromIndicator = pointDistance2D(indicatorLocal, closest.point);
+                        markerMesh.position.set(closest.point.x, 0.001, closest.point.z);
+                        markerMesh.visible = true;
+                        markerMesh.material.color.setHex(distanceFromIndicator < GRAB_RADIUS ? COLORS.markerValid : COLORS.markerFar);
+                    }
+
+                    if (state.isDrawing) {
+                        const lastPoint = state.currentPath[state.currentPath.length - 1];
+                        if (pointDistance2D(indicatorLocal, lastPoint) >= SAMPLE_DISTANCE) {
+                            state.currentPath.push(indicatorLocal.clone());
+                            updateDrawnPathVisuals();
+                        }
+                        const endClosest = closestPointOnPolyline(indicatorLocal, state.frontier);
+                        const endDistance = pointDistance2D(indicatorLocal, endClosest.point);
+                        if (markerMesh) {
+                            markerMesh.position.set(endClosest.point.x, 0.001, endClosest.point.z);
+                            markerMesh.material.color.setHex(endDistance < GRAB_RADIUS ? COLORS.markerValid : COLORS.markerFar);
+                        }
+                    }
+                }
+            } else if (controllerIndicator) {
+                if (controllerIndicator.parent) controllerIndicator.parent.remove(controllerIndicator);
+                controllerIndicator.visible = false;
+            }
+
+            positionFloatingText();
+        }
+
+        function resetGame() {
+            clearSavedBoard();
+            calibrationState.localPoints = [];
+            calibrationState.worldPoints = [];
+            calibrationState.baseBoardPose = null;
+            calibrationState.resumeState = GameState.PLAYING;
+            calibrationState.reason = '';
+            calibrationState.lastButtonStates = [[], []];
+
+            state.current = GameState.SIZE_SELECTION;
+            state.selectedSize = null;
+            state.selectingController = null;
+            state.controllerIndex = null;
+            state.squareRotation = 0;
+            state.squarePosition.set(0, 0, 0);
+            state.frontier = [];
+            state.currentPlayer = 1;
+            state.score1 = 50;
+            state.score2 = 50;
+            state.isDrawing = false;
+            state.currentPath = [];
+            state.startLocation = null;
+
+            selectionCubes.forEach(c => c.visible = true);
+            [previewSquare, gameSquare, scoreText1, scoreText2, gameOverText, controllerHintText, calibrationTip].forEach(removeFromParent);
+            previewSquare = gameSquare = player1Mesh = player2Mesh = frontierLine = markerMesh = drawnPathLine = controllerIndicator = scoreText1 = scoreText2 = gameOverText = controllerHintText = calibrationTip = null;
+            updateUI();
+        }
+
+        window.addEventListener('keydown', event => {
+            if (event.key.toLowerCase() === 'r') resetGame();
+        });
+
+        function render(timestamp, frame) {
+            update(frame);
+            renderer.render(scene, camera);
+        }
+        renderer.setAnimationLoop(render);
+
+        const arButton = document.getElementById('arButton');
+
+        function sessionInitFor(mode) {
+            const requiredFeatures = ['local-floor'];
+            const optionalFeatures = mode === 'immersive-ar'
+                ? ['bounded-floor', 'hand-tracking', 'dom-overlay']
+                : ['bounded-floor', 'hand-tracking'];
+
+            const init = { requiredFeatures, optionalFeatures };
+            if (mode === 'immersive-ar') init.domOverlay = { root: document.body };
+            return init;
+        }
+
+        async function enterXR(mode) {
+            try {
+                const session = await navigator.xr.requestSession(mode, sessionInitFor(mode));
+
+                calibrationState.session = session;
+                calibrationState.referenceSpace = null;
+                calibrationState.hiddenWhileInXR = false;
+                calibrationState.lastButtonStates = [[], []];
+
+                session.addEventListener('visibilitychange', () => {
+                    if (session.visibilityState !== 'visible') {
+                        calibrationState.hiddenWhileInXR = true;
+                        return;
+                    }
+                    if (calibrationState.hiddenWhileInXR) {
+                        calibrationState.hiddenWhileInXR = false;
+                        startRecalibration('XR session resumed after visibility change');
+                    }
+                });
+
+                session.addEventListener('end', () => {
+                    detachReferenceSpaceResetHandler();
+                    calibrationState.session = null;
+                    calibrationState.referenceSpace = null;
+                    calibrationState.hiddenWhileInXR = false;
+                    arButton.textContent = mode === 'immersive-ar' ? 'Enter AR' : 'Use VR instead';
+                });
+
+                await renderer.xr.setSession(session);
+                if (gameSquare && calibrationState.localPoints.length === 2 && !isCalibrationState()) {
+                    startRecalibration('new XR session started');
+                }
+                arButton.textContent = mode === 'immersive-ar' ? 'Exit AR' : 'Exit VR';
+            } catch (error) {
+                debugLog('Could not start XR: ' + error.message);
+            }
+        }
+
+        arButton.addEventListener('click', async () => {
+            const currentSession = renderer.xr.getSession();
+            if (currentSession) {
+                currentSession.end();
+                return;
+            }
+            const mode = arButton.dataset.mode || 'immersive-ar';
+            await enterXR(mode);
+        });
+
+        async function configureXRButton() {
+            if (!('xr' in navigator)) {
+                arButton.textContent = 'WebXR Not Available';
+                arButton.disabled = true;
+                return;
+            }
+
+            try {
+                const arSupported = await navigator.xr.isSessionSupported('immersive-ar');
+                if (arSupported) {
+                    arButton.dataset.mode = 'immersive-ar';
+                    arButton.textContent = 'Enter AR';
+                    return;
+                }
+
+                const vrSupported = await navigator.xr.isSessionSupported('immersive-vr');
+                if (vrSupported) {
+                    arButton.dataset.mode = 'immersive-vr';
+                    arButton.textContent = 'Use VR instead';
+                    return;
+                }
+
+                arButton.textContent = 'XR Not Supported';
+                arButton.disabled = true;
+            } catch (error) {
+                arButton.textContent = 'XR Check Failed';
+                arButton.disabled = true;
+                debugLog('XR support check failed: ' + error.message);
+            }
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        updateUI();
+        configureXRButton();
+    </script>
+</body>
+</html>
