@@ -389,6 +389,7 @@
     let data = loadData();
     let currentUser = "";
     let run = [];
+    let runQuestions = [];
     let qIndex = 0;
     let activeQuestion = null;
     let questionStart = 0;
@@ -495,10 +496,23 @@
       showScreen("screenHome");
     }
 
-    function randomQuestion() {
-      const a = 2 + Math.floor(Math.random() * 11);
-      const b = 2 + Math.floor(Math.random() * 11);
-      return { a, b, answer: a * b };
+    function buildQuestionPool() {
+      const pool = [];
+      for (let a = 2; a <= 12; a++) {
+        for (let b = a; b <= 12; b++) {
+          pool.push({ a, b, answer: a * b });
+        }
+      }
+      return pool;
+    }
+
+    function shuffleArray(items) {
+      const shuffled = [...items];
+      for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+      return shuffled;
     }
 
     function startRun() {
@@ -506,6 +520,11 @@
       run = [];
       qIndex = 0;
       el("liveScore").textContent = "0";
+
+      // Build a fresh shuffled set of unordered pairs for this run.
+      // This means 7 × 8 and 8 × 7 are treated as the same pair, so only one can appear.
+      runQuestions = shuffleArray(buildQuestionPool()).slice(0, QUESTION_COUNT);
+
       showScreen("screenTest");
       nextQuestion();
     }
@@ -524,7 +543,7 @@
         return;
       }
 
-      activeQuestion = randomQuestion();
+      activeQuestion = runQuestions[qIndex];
       acceptingAnswer = true;
       questionStart = performance.now();
 
